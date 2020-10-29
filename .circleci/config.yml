@@ -1,0 +1,132 @@
+# CircleCI 2.0 configuration file
+version: 2
+jobs:
+  build:
+    working_directory: ~/repo
+
+    environment:
+      BASH_ENV: ~/.nvm/nvm.sh
+
+    docker:
+      # specify the version you desire here
+      - image: laratools/ci:7.3
+
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - 4a:36:91:75:2d:d1:a2:f7:a4:07:da:b7:93:df:a3:86
+
+      - checkout
+
+      # Download and cache dependencies
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "composer.lock" }}-{{ checksum "yarn.lock" }}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
+
+      - run:
+          name: PHP Information
+          command: |
+            php --version
+            composer --version
+
+      - run:
+          name: Install PHP Dependencies
+          command: composer install -n --prefer-dist --profile -vvv
+
+      - run:
+          name: Install Node Dependencies
+          command: |
+            nvm install 10
+            npm i -g yarn
+            yarn install
+
+      - save_cache:
+          key: v1-dependencies-{{ checksum "composer.lock" }}-{{ checksum "yarn.lock" }}
+          paths:
+            - ./vendor
+            - ./node_modules
+
+  test_php:
+    working_directory: ~/repo
+
+    docker:
+      - image: laratools/ci:7.3
+
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - 4a:36:91:75:2d:d1:a2:f7:a4:07:da:b7:93:df:a3:86
+
+      - checkout
+
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "composer.lock" }}-{{ checksum "yarn.lock" }}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
+
+      - run:
+          name: PHP Information
+          command: |
+            php --version
+            composer --version
+            php artisan fresh-bus:version
+
+      - run:
+          name: Lint PHP
+          command: composer lint
+
+      - run:
+          name: Passport keys workaround (https://github.com/laravel/passport/issues/441#issuecomment-413167867)
+          command: |
+            openssl genrsa -out storage/oauth-private.key 4096
+            openssl rsa -in storage/oauth-private.key -pubout > storage/oauth-public.key
+
+      - run:
+          name: Unit Test with Code Coverage
+          command: composer test
+
+  test_js:
+    working_directory: ~/repo
+
+    environment:
+      BASH_ENV: ~/.nvm/nvm.sh
+
+    docker:
+      - image: laratools/ci:7.3
+
+    steps:
+      - add_ssh_keys:
+          fingerprints:
+            - 4a:36:91:75:2d:d1:a2:f7:a4:07:da:b7:93:df:a3:86
+
+      - checkout
+
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "composer.lock" }}-{{ checksum "yarn.lock" }}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
+
+      - run:
+          name: JS Test and Lint
+          command: |
+            nvm install 10
+            npm i -g yarn
+            yarn lint
+            yarn test --maxWorkers=4
+          no_output_timeout: 20m
+
+workflows:
+  version: 2
+  build_and_test:
+    jobs:
+      - build
+      - test_php:
+          requires:
+            - build
+      - test_js:
+          requires:
+            - build
